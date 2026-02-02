@@ -10,6 +10,7 @@ from gr00t_wbc.control.policy.teleop_policy import TeleopPolicy
 from gr00t_wbc.control.robot_model.instantiation.g1 import instantiate_g1_robot_model
 from gr00t_wbc.control.teleop.solver.hand.instantiation.g1_hand_ik_instantiation import (
     instantiate_g1_hand_ik_solver,
+    instantiate_g1_inspire_hand_ik_solver,
 )
 from gr00t_wbc.control.teleop.teleop_retargeting_ik import TeleopRetargetingIK
 from gr00t_wbc.control.utils.ros_utils import ROSManager, ROSMsgPublisher
@@ -27,7 +28,15 @@ def main(config: TeleopConfig):
         robot_model = instantiate_g1_robot_model(
             waist_location=waist_location, high_elbow_pose=config.high_elbow_pose
         )
-        left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_hand_ik_solver()
+        # Select hand IK solver based on hand type
+        if config.hand_type == "inspire":
+            left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_inspire_hand_ik_solver(
+                mode=config.inspire_hand_ik_mode
+            )
+            print(f"Using Inspire hand IK solver with mode: {config.inspire_hand_ik_mode}")
+        else:  # dex3
+            left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_hand_ik_solver()
+            print("Using Dex3 gripper IK solver")
     else:
         raise ValueError(f"Unsupported robot name: {config.robot}")
 
@@ -53,6 +62,7 @@ def main(config: TeleopConfig):
             body_streamer_keyword=config.body_streamer_keyword,
             enable_real_device=config.enable_real_device,
             replay_data_path=config.teleop_replay_path,
+            use_hand_tracking=config.use_hand_tracking,
         )
 
     # Create a publisher for the navigation commands

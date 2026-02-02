@@ -17,7 +17,16 @@ R_HEADSET_TO_WORLD = np.array(
 
 
 class PicoStreamer(BaseStreamer):
-    def __init__(self):
+    def __init__(self, use_hand_tracking: bool = False):
+        """
+        Initialize the Pico streamer.
+
+        Args:
+            use_hand_tracking: If True, use Pico hand tracking for finger control
+                              instead of controller buttons. Wrist pose still comes
+                              from controllers.
+        """
+        self.use_hand_tracking = use_hand_tracking
         self.xr_client = XrClient()
         self.run_pico_service()
 
@@ -245,7 +254,18 @@ class PicoStreamer(BaseStreamer):
         return sign * (abs(value) - dead_zone) / (1.0 - dead_zone)
 
     def _generate_finger_data(self, pico_data, hand):
-        """Generate finger position data."""
+        """Generate finger position data.
+
+        If use_hand_tracking is enabled, converts Pico hand tracking data to finger
+        positions. Otherwise, uses controller buttons for discrete finger control.
+        """
+        if self.use_hand_tracking:
+            return self._generate_finger_data_from_hand_tracking(pico_data, hand)
+        else:
+            return self._generate_finger_data_from_controller(pico_data, hand)
+
+    def _generate_finger_data_from_controller(self, pico_data, hand):
+        """Generate finger data from controller buttons (original behavior)."""
         fingertips = np.zeros([25, 4, 4])
 
         thumb = 0
@@ -262,6 +282,103 @@ class PicoStreamer(BaseStreamer):
                 fingertips[4 + middle, 0, 3] = 1.0  # close middle
             elif not pico_data[f"{hand}_trigger"] > 0.5 and pico_data[f"{hand}_grip"] > 0.5:
                 fingertips[4 + ring, 0, 3] = 1.0  # close ring
+
+        return fingertips
+
+    def _generate_finger_data_from_hand_tracking(self, pico_data, hand):
+        """Generate finger data from Pico hand tracking.
+
+        Converts the 27-joint OpenXR hand tracking data to the 25-joint format
+        used by the teleop system.
+
+        OpenXR hand joint layout (27 joints):
+            0: Palm, 1: Wrist
+            2-5: Thumb (metacarpal, proximal, distal, tip)
+            6-10: Index (metacarpal, proximal, intermediate, distal, tip)
+            11-15: Middle
+            16-20: Ring
+            21-25: Little
+
+        System finger layout (25 joints, 5 per finger):
+            0-4: Thumb (metacarpal to tip)
+            5-9: Index
+            10-14: Middle
+            15-19: Ring
+            20-24: Pinky
+        """
+        hand_tracking_key = f"{hand}_hand_tracking_state"
+        hand_tracking_data = pico_data.get(hand_tracking_key)
+
+        # Initialize with identity matrices
+        fingertips = np.zeros([25, 4, 4])
+        for i in range(25):
+            fingertips[i] = np.eye(4)
+
+        # If hand tracking is not available, fall back to controller-based control
+        if hand_tracking_data is None:
+            return self._generate_finger_data_from_controller(pico_data, hand)
+
+        # Convert OpenXR hand tracking data (27 x 7) to fingertip format (25 x 4 x 4)
+        # Each row in hand_tracking_data is [x, y, z, qx, qy, qz, qw]
+
+        # Mapping from OpenXR indices to system indices:
+        # OpenXR Thumb (2-5, 4 joints) -> System Thumb (0-4, 5 joints)
+        # We duplicate the metacarpal to fill the extra slot
+        openxr_to_system_mapping = {
+            # Thumb: OpenXR has 4 joints (2-5), system expects 5 joints (0-4)
+            # Duplicate metacarpal at position 0
+            0: 2,  # System thumb metacarpal <- OpenXR thumb metacarpal
+            1: 2,  # System thumb proximal <- OpenXR thumb metacarpal (duplicate)
+            2: 3,  # System thumb intermediate <- OpenXR thumb proximal
+            3: 4,  # System thumb distal <- OpenXR thumb distal
+            4: 5,  # System thumb tip <- OpenXR thumb tip
+            # Index: OpenXR (6-10) -> System (5-9)
+            5: 6,
+            6: 7,
+            7: 8,
+            8: 9,
+            9: 10,
+            # Middle: OpenXR (11-15) -> System (10-14)
+            10: 11,
+            11: 12,
+            12: 13,
+            13: 14,
+            14: 15,
+            # Ring: OpenXR (16-20) -> System (15-19)
+            15: 16,
+            16: 17,
+            17: 18,
+            18: 19,
+            19: 20,
+            # Little/Pinky: OpenXR (21-25) -> System (20-24)
+            20: 21,
+            21: 22,
+            22: 23,
+            23: 24,
+            24: 25,
+        }
+
+        for system_idx, openxr_idx in openxr_to_system_mapping.items():
+            if openxr_idx < len(hand_tracking_data):
+                joint_pose = hand_tracking_data[openxr_idx]
+
+                # Extract position and orientation
+                pos = joint_pose[:3]  # x, y, z
+                quat = joint_pose[3:]  # qx, qy, qz, qw
+
+                # Convert from Y-up (OpenXR) to Z-up (robot frame)
+                pos_zup = R_HEADSET_TO_WORLD @ pos
+
+                # Convert quaternion to rotation matrix and transform
+                if not np.allclose(quat, 0):
+                    rot_matrix = R.from_quat(quat).as_matrix()
+                    rot_matrix_zup = R_HEADSET_TO_WORLD @ rot_matrix @ R_HEADSET_TO_WORLD.T
+                else:
+                    rot_matrix_zup = np.eye(3)
+
+                # Build transformation matrix
+                fingertips[system_idx, :3, :3] = rot_matrix_zup
+                fingertips[system_idx, :3, 3] = pos_zup
 
         return fingertips
 

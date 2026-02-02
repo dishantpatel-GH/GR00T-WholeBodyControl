@@ -18,6 +18,7 @@ from gr00t_wbc.control.robot_model.instantiation import get_robot_type_and_model
 from gr00t_wbc.control.robot_model.robot_model import RobotModel
 from gr00t_wbc.control.teleop.solver.hand.instantiation.g1_hand_ik_instantiation import (
     instantiate_g1_hand_ik_solver,
+    instantiate_g1_inspire_hand_ik_solver,
 )
 from gr00t_wbc.control.teleop.teleop_retargeting_ik import TeleopRetargetingIK
 from gr00t_wbc.control.utils.episode_state import EpisodeState
@@ -541,7 +542,13 @@ def get_teleop_policy(
     activate_keyboard_listener: bool = True,
 ) -> TeleopPolicy:
     if robot_type == "g1":
-        left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_hand_ik_solver()
+        # Select hand IK solver based on hand type
+        if config.hand_type == "inspire":
+            left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_inspire_hand_ik_solver(
+                mode=config.inspire_hand_ik_mode
+            )
+        else:  # dex3
+            left_hand_ik_solver, right_hand_ik_solver = instantiate_g1_hand_ik_solver()
     else:
         raise ValueError(f"Invalid robot type: {robot_type}")
 
@@ -565,6 +572,7 @@ def get_teleop_policy(
         replay_data_path=config.replay_data_path,
         replay_speed=config.replay_speed,
         activate_keyboard_listener=activate_keyboard_listener,
+        use_hand_tracking=config.use_hand_tracking,
     )
     return teleop_policy
 

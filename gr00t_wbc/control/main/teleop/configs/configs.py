@@ -111,9 +111,18 @@ class BaseConfig(ArgsConfigTemplate):
     with_hands: bool = True
     """Enable hand functionality. When False, robot operates without hands."""
 
-    # --- Add hand_type field ---
+    # --- Hand Configuration ---
     hand_type: Literal["dex3", "inspire"] = "dex3"
     """Type of hand to use. Options: 'dex3' (default), 'inspire'."""
+
+    use_hand_tracking: bool = False
+    """Use Pico hand tracking for finger control instead of controller buttons.
+    Only applicable when body_control_device or hand_control_device is 'pico'."""
+
+    inspire_hand_ik_mode: Literal["finger_curl", "fingertip_distance"] = "fingertip_distance"
+    """IK mode for Inspire hands when use_hand_tracking is enabled.
+    - 'fingertip_distance': Uses thumb-to-fingertip distances for grip detection (default)
+    - 'finger_curl': Maps finger curl angles from hand tracking to joint commands"""
     # ---------------------------
 
     high_elbow_pose: bool = False
